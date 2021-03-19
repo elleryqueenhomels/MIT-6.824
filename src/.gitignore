@@ -1,6 +1,8 @@
 *.*/
 main/mr-tmp/
+main/tmp_mr/
 mrtmp.*
+mr-out-*
 824-mrinput-*.txt
 /main/diff.out
 /mapreduce/x.txt
