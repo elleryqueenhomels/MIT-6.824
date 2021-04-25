@@ -445,7 +445,12 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	}
 }
 
-func (rf *Raft) broadcaseAppendEntries() {
+func (rf *Raft) broadcastAppendEntries(useLock bool) {
+	if useLock {
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+	}
+
 	if rf.state != Leader {
 		return
 	}
@@ -508,7 +513,7 @@ func (rf *Raft) convertToLeader(fromState State) {
 	rf.resetChannels()
 	rf.state = Leader
 
-	rf.broadcaseAppendEntries()
+	rf.broadcastAppendEntries(false)
 }
 
 func (rf *Raft) sendToChannel(ch chan bool, val bool) {
@@ -563,6 +568,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	rf.logs = append(rf.logs, LogEntry{rf.currentTerm, command})
+	go rf.broadcastAppendEntries(true)
 
 	return rf.getLastLogIndex(), rf.currentTerm, true
 }
@@ -619,9 +625,7 @@ func (rf *Raft) ticker() {
 			select {
 			case <-rf.downToFollowerCh:
 			case <-time.After(time.Millisecond * HeartbeatInterval):
-				rf.mu.Lock()
-				rf.broadcaseAppendEntries()
-				rf.mu.Unlock()
+				rf.broadcastAppendEntries(true)
 			}
 		}
 	}
