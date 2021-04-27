@@ -18,20 +18,20 @@ package raft
 //
 
 import (
-	//	"bytes"
-
+	"bytes"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	//	"6.824/labgob"
+	"6.824/labgob"
 	"6.824/labrpc"
 )
 
-const HeartbeatInterval = 120    // ms
-const EletionTimeoutBase = 360   // ms
-const EletionTimeoutRandom = 240 // ms
+const HeartbeatInterval = 60     // ms
+const EletionTimeoutBase = 150   // ms
+const EletionTimeoutRandom = 150 // ms
 
 type State int
 
@@ -122,35 +122,56 @@ func (rf *Raft) GetState() (int, bool) {
 //
 func (rf *Raft) persist() {
 	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	buf := new(bytes.Buffer)
+	enc := labgob.NewEncoder(buf)
+
+	if err := enc.Encode(rf.currentTerm); err != nil {
+		panic(fmt.Sprintf("Failed to encode currentTerm. Error: %s", err))
+	}
+
+	if err := enc.Encode(rf.votedFor); err != nil {
+		panic(fmt.Sprintf("Failed to encode votedFor. Error: %s", err))
+	}
+
+	if err := enc.Encode(rf.logs); err != nil {
+		panic(fmt.Sprintf("Failed to encode logs. Error: %s", err))
+	}
+
+	data := buf.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
 // restore previously persisted state.
 //
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	// bootstrap without any state?
+	if data == nil || len(data) < 1 {
 		return
 	}
+
 	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	buf := bytes.NewBuffer(data)
+	dec := labgob.NewDecoder(buf)
+
+	var term int
+	if err := dec.Decode(&term); err != nil {
+		panic(fmt.Sprintf("Failed to decode currentTerm. Error: %s", err))
+	}
+
+	var votedFor int
+	if err := dec.Decode(&votedFor); err != nil {
+		panic(fmt.Sprintf("Failed to decode votedFor. Error: %s", err))
+	}
+
+	var logs []LogEntry
+	if err := dec.Decode(&logs); err != nil {
+		panic(fmt.Sprintf("Failed to decode logs. Error: %s", err))
+	}
+
+	rf.currentTerm = term
+	rf.votedFor = votedFor
+	rf.logs = logs
 }
 
 //
@@ -201,6 +222,7 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
+	defer rf.persist()
 	defer rf.mu.Unlock()
 
 	if args.Term < rf.currentTerm {
@@ -292,6 +314,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 
 	if reply.Term > rf.currentTerm {
 		rf.downToFollower(reply.Term)
+		rf.persist()
 		return
 	}
 
@@ -353,6 +376,7 @@ func (rf *Raft) applyLogs() {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
+	defer rf.persist()
 	defer rf.mu.Unlock()
 
 	// handle heart-beat
@@ -413,6 +437,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 
 	if reply.Term > rf.currentTerm {
 		rf.downToFollower(reply.Term)
+		rf.persist()
 		return
 	}
 
@@ -476,9 +501,9 @@ func (rf *Raft) makeAppendEntriesRPC(server int) {
 func (rf *Raft) downToFollower(term int) {
 	fromState := rf.state
 	rf.currentTerm = term
-	rf.state = Follower
-	rf.votesCount = 0
 	rf.votedFor = -1
+	rf.votesCount = 0
+	rf.state = Follower
 	if fromState != Follower {
 		rf.sendToChannel(rf.downToFollowerCh, true)
 	}
@@ -497,6 +522,7 @@ func (rf *Raft) convertToCandidate(fromState State) {
 	rf.state = Candidate
 	rf.votedFor = rf.me
 	rf.votesCount = 1
+	rf.persist()
 
 	rf.broadcastRequestVotes()
 }
@@ -568,6 +594,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	rf.logs = append(rf.logs, LogEntry{rf.currentTerm, command})
+	rf.persist()
+
 	go rf.broadcastAppendEntries(true)
 
 	return rf.getLastLogIndex(), rf.currentTerm, true
