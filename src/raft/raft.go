@@ -30,8 +30,8 @@ import (
 )
 
 const HeartbeatInterval = 60     // ms
-const EletionTimeoutBase = 150   // ms
-const EletionTimeoutRandom = 150 // ms
+const EletionTimeoutBase = 180   // ms
+const EletionTimeoutRandom = 120 // ms
 
 type State int
 
@@ -358,6 +358,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
+	// For reducing retry times when rejected
+	ConflictTerm  int
+	ConflictIndex int
 }
 
 func (rf *Raft) applyLogs() {
@@ -383,6 +386,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false
+		reply.ConflictTerm = -1
+		reply.ConflictIndex = -1
 		return
 	}
 
@@ -391,11 +396,23 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	rf.sendToChannel(rf.heartbeatCh, true)
+
 	reply.Term = args.Term
+	reply.Success = false
+	reply.ConflictTerm = -1
+	reply.ConflictIndex = -1
 
 	// handle normal append-entries
-	if rf.getLastLogIndex() < args.PrevLogIndex || rf.logs[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.Success = false
+	if rf.getLastLogIndex() < args.PrevLogIndex {
+		reply.ConflictIndex = rf.getLastLogIndex() + 1
+		return
+	}
+
+	if rfTerm := rf.logs[args.PrevLogIndex].Term; rfTerm != args.PrevLogTerm {
+		reply.ConflictTerm = rfTerm
+		for i := args.PrevLogIndex; i >= 0 && rf.logs[i].Term == rfTerm; i-- {
+			reply.ConflictIndex = i
+		}
 		return
 	}
 
@@ -448,7 +465,25 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		}
 		rf.nextIndex[server] = rf.matchIndex[server] + 1
 	} else {
-		rf.nextIndex[server]--
+		// follower's log is shorter than leader's
+		if reply.ConflictTerm < 0 {
+			rf.nextIndex[server] = reply.ConflictIndex
+		} else {
+			// try to find the conflict term in leader's log
+			newNextIdx := rf.getLastLogIndex()
+			for ; newNextIdx >= 0; newNextIdx-- {
+				if rf.logs[newNextIdx].Term == reply.ConflictTerm {
+					break
+				}
+			}
+
+			// if not found, set nextIndex to conflictIndex
+			if newNextIdx < 0 {
+				rf.nextIndex[server] = reply.ConflictIndex
+			} else {
+				rf.nextIndex[server] = newNextIdx
+			}
+		}
 		rf.makeAppendEntriesRPC(server)
 	}
 
