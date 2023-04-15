@@ -19,31 +19,22 @@ const TaskInterval = 200 // milliseconds
 var workerId int
 var reduceCount int
 
-//
 // Map functions return a slice of KeyValue.
-//
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-//
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
-//
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-//
 // main/mrworker.go calls this function.
-//
-func Worker(
-	mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
-
+func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []string) string) {
 	// Your worker implementation here.
 	workerId = os.Getpid()
 	rCount, succ := getReduceCount()
@@ -67,14 +58,14 @@ func Worker(
 
 		canExit, succ := false, true
 		if reply.TaskType == MapTask {
-			done := doMap(mapf, reply.TaskId, reply.FilePath)
+			done := doMap(mapFn, reply.TaskId, reply.FilePath)
 			if done {
 				canExit, succ = reportTaskFinished(MapTask, reply.TaskId)
 			} else {
 				reportTaskFailed(MapTask, reply.TaskId)
 			}
 		} else if reply.TaskType == ReduceTask {
-			done := doReduce(reducef, reply.TaskId)
+			done := doReduce(reduceFn, reply.TaskId)
 			if done {
 				canExit, succ = reportTaskFinished(ReduceTask, reply.TaskId)
 			} else {
@@ -95,7 +86,7 @@ func Worker(
 	}
 }
 
-func doMap(mapf func(string, string) []KeyValue, mapId int, filePath string) bool {
+func doMap(mapFn func(string, string) []KeyValue, mapId int, filePath string) bool {
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatalf("Cannot open file: %v [MapId: %v]\n", filePath, mapId)
@@ -108,7 +99,7 @@ func doMap(mapf func(string, string) []KeyValue, mapId int, filePath string) boo
 		return false
 	}
 
-	kva := mapf(filePath, string(content))
+	kva := mapFn(filePath, string(content))
 	return writeMapOutput(kva, mapId)
 }
 
@@ -162,7 +153,7 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 	return true
 }
 
-func doReduce(reducef func(string, []string) string, reduceId int) bool {
+func doReduce(reduceFn func(string, []string) string, reduceId int) bool {
 	filePaths, err := filepath.Glob(fmt.Sprintf("%v/mr-%v-%v", TempDir, "*", reduceId))
 	if err != nil {
 		log.Fatalf("Cannot to list intermediate files. [ReduceId: %v]\n", reduceId)
@@ -191,10 +182,10 @@ func doReduce(reducef func(string, []string) string, reduceId int) bool {
 		}
 	}
 
-	return writeReduceOutput(reducef, kvMap, reduceId)
+	return writeReduceOutput(reduceFn, kvMap, reduceId)
 }
 
-func writeReduceOutput(reducef func(string, []string) string, kvMap map[string][]string, reduceId int) bool {
+func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string][]string, reduceId int) bool {
 	keys := make([]string, 0, len(kvMap))
 	for k := range kvMap {
 		keys = append(keys, k)
@@ -210,7 +201,7 @@ func writeReduceOutput(reducef func(string, []string) string, kvMap map[string][
 
 	buf := bufio.NewWriter(file)
 	for _, k := range keys {
-		v := reducef(k, kvMap[k])
+		v := reduceFn(k, kvMap[k])
 		_, err := fmt.Fprintf(buf, "%v %v\n", k, v)
 		if err != nil {
 			log.Fatalf("Cannot write reduce result to file: %v [ReduceId: %v]\n", filePath, reduceId)
@@ -267,11 +258,9 @@ func getReduceCount() (int, bool) {
 	return reply.ReduceCount, succ
 }
 
-//
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-//
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
