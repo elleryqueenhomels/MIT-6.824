@@ -189,7 +189,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Your code here.
 	nMap := len(files)
-	reduceCount = nReduce
 
 	c.nMap = nMap
 	c.nReduce = nReduce
