@@ -42,8 +42,8 @@ type Task struct {
 type Coordinator struct {
 	// Your definitions here.
 	mu          sync.Mutex
-	mapTasks    []Task
-	reduceTasks []Task
+	mapTasks    []*Task
+	reduceTasks []*Task
 	nMap        int
 	nReduce     int
 }
@@ -97,9 +97,9 @@ func (c *Coordinator) ReportTaskFinished(args *ReportTaskFinishedArgs, reply *Re
 
 	var task *Task
 	if args.TaskType == MapTask {
-		task = &c.mapTasks[args.TaskId]
+		task = c.mapTasks[args.TaskId]
 	} else {
-		task = &c.reduceTasks[args.TaskId]
+		task = c.reduceTasks[args.TaskId]
 	}
 
 	if task.TaskState == InProgress && task.WorkerId == args.WorkerId {
@@ -126,9 +126,9 @@ func (c *Coordinator) ReportTaskFailed(args *ReportTaskFailedArgs, reply *Report
 
 	var task *Task
 	if args.TaskType == MapTask {
-		task = &c.mapTasks[args.TaskId]
+		task = c.mapTasks[args.TaskId]
 	} else {
-		task = &c.reduceTasks[args.TaskId]
+		task = c.reduceTasks[args.TaskId]
 	}
 
 	if task.TaskState == InProgress && task.WorkerId == args.WorkerId {
@@ -139,10 +139,10 @@ func (c *Coordinator) ReportTaskFailed(args *ReportTaskFailedArgs, reply *Report
 	return nil
 }
 
-func selectTask(tasks []Task) *Task {
-	for i := 0; i < len(tasks); i++ {
-		if tasks[i].TaskState == NotStarted {
-			return &tasks[i]
+func selectTask(tasks []*Task) *Task {
+	for _, task := range tasks {
+		if task.TaskState == NotStarted {
+			return task
 		}
 	}
 	return &Task{NoTask, NotStarted, -1, "", -1}
@@ -197,15 +197,27 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c.nMap = nMap
 	c.nReduce = nReduce
-	c.mapTasks = make([]Task, 0, nMap)
-	c.reduceTasks = make([]Task, 0, nReduce)
+	c.mapTasks = make([]*Task, 0, nMap)
+	c.reduceTasks = make([]*Task, 0, nReduce)
 
 	for i, filePath := range files {
-		mapTask := Task{MapTask, NotStarted, i, filePath, -1}
+		mapTask := &Task{
+			TaskType:  MapTask,
+			TaskState: NotStarted,
+			TaskId:    i,
+			FilePath:  filePath,
+			WorkerId:  -1,
+		}
 		c.mapTasks = append(c.mapTasks, mapTask)
 	}
 	for i := 0; i < nReduce; i++ {
-		reduceTask := Task{ReduceTask, NotStarted, i, "", -1}
+		reduceTask := &Task{
+			TaskType:  ReduceTask,
+			TaskState: NotStarted,
+			TaskId:    i,
+			FilePath:  "",
+			WorkerId:  -1,
+		}
 		c.reduceTasks = append(c.reduceTasks, reduceTask)
 	}
 
