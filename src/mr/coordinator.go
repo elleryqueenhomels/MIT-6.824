@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -67,6 +68,10 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 		task = selectTask(c.reduceTasks)
 	} else {
 		task = &Task{ExitTask, NotStarted, -1, "", -1}
+	}
+
+	if task.TaskType == NoTask {
+		return errors.New("no available task")
 	}
 
 	task.WorkerId = args.WorkerId

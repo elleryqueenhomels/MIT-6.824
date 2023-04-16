@@ -62,23 +62,23 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 			if done {
 				canExit, succ = reportTaskFinished(MapTask, reply.TaskId)
 			} else {
-				reportTaskFailed(MapTask, reply.TaskId)
+				succ = reportTaskFailed(MapTask, reply.TaskId)
 			}
 		} else if reply.TaskType == ReduceTask {
 			done := doReduce(reduceFn, reply.TaskId)
 			if done {
 				canExit, succ = reportTaskFinished(ReduceTask, reply.TaskId)
 			} else {
-				reportTaskFailed(ReduceTask, reply.TaskId)
+				succ = reportTaskFailed(ReduceTask, reply.TaskId)
 			}
 		}
 
-		if canExit {
-			fmt.Printf("All tasks are finished. Worker-%v exiting.\n", workerId)
-			return
-		}
 		if !succ {
 			fmt.Printf("Coordinator has exited. Worker-%v exiting.\n", workerId)
+			return
+		}
+		if canExit {
+			fmt.Printf("All tasks are finished. Worker-%v exiting.\n", workerId)
 			return
 		}
 
