@@ -168,7 +168,7 @@ func (c *Coordinator) waitForTask(task *Task) {
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
-	//l, e := net.Listen("tcp", ":1234")
+	// l, e := net.Listen("tcp", ":1234")
 	sockname := coordinatorSock()
 	os.Remove(sockname)
 	l, e := net.Listen("unix", sockname)

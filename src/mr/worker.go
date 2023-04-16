@@ -90,13 +90,11 @@ func doMap(mapFn func(string, string) []KeyValue, mapId int, filePath string) bo
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatalf("Cannot open file: %v [MapId: %v]\n", filePath, mapId)
-		return false
 	}
 
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
 		log.Fatalf("Cannot read content from file: %v [MapId: %v]\n", filePath, mapId)
-		return false
 	}
 
 	kva := mapFn(filePath, string(content))
@@ -114,7 +112,6 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 		file, err := os.Create(filePath)
 		if err != nil {
 			log.Fatalf("Cannot create file: %v [MapId: %v]\n", filePath, mapId)
-			return false
 		}
 
 		buf := bufio.NewWriter(file)
@@ -128,7 +125,6 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 		err := encoders[reduceId].Encode(kv)
 		if err != nil {
 			log.Fatalf("Cannot encode %v to file: %v [MapId: %v]\n", kv, files[reduceId].Name(), mapId)
-			return false
 		}
 	}
 
@@ -136,7 +132,6 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 		err := buf.Flush()
 		if err != nil {
 			log.Fatalf("Cannot flush file: %v [MapId: %v]\n", files[i].Name(), mapId)
-			return false
 		}
 	}
 
@@ -146,7 +141,6 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 		err := os.Rename(file.Name(), newPath)
 		if err != nil {
 			log.Fatalf("Cannot rename file from %v to %v [MapId: %v]\n", files[i].Name(), newPath, mapId)
-			return false
 		}
 	}
 
@@ -157,7 +151,6 @@ func doReduce(reduceFn func(string, []string) string, reduceId int) bool {
 	filePaths, err := filepath.Glob(fmt.Sprintf("%v/mr-%v-%v", TempDir, "*", reduceId))
 	if err != nil {
 		log.Fatalf("Cannot to list intermediate files. [ReduceId: %v]\n", reduceId)
-		return false
 	}
 
 	var kvMap = make(map[string][]string)
@@ -167,7 +160,6 @@ func doReduce(reduceFn func(string, []string) string, reduceId int) bool {
 		file, err := os.Open(filePath)
 		if err != nil {
 			log.Fatalf("Cannot open file: %v [ReduceId: %v]\n", filePath, reduceId)
-			return false
 		}
 
 		dec := json.NewDecoder(file)
@@ -175,7 +167,6 @@ func doReduce(reduceFn func(string, []string) string, reduceId int) bool {
 			err = dec.Decode(&kv)
 			if err != nil {
 				log.Fatalf("Cannot decode from file: %v [ReduceId: %v]\n", filePath, reduceId)
-				return false
 			}
 
 			kvMap[kv.Key] = append(kvMap[kv.Key], kv.Value)
@@ -196,7 +187,6 @@ func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string]
 	file, err := os.Create(filePath)
 	if err != nil {
 		log.Fatalf("Cannot create file: %v [ReduceId: %v]\n", filePath, reduceId)
-		return false
 	}
 
 	buf := bufio.NewWriter(file)
@@ -205,14 +195,12 @@ func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string]
 		_, err := fmt.Fprintf(buf, "%v %v\n", k, v)
 		if err != nil {
 			log.Fatalf("Cannot write reduce result to file: %v [ReduceId: %v]\n", filePath, reduceId)
-			return false
 		}
 	}
 
 	err = buf.Flush()
 	if err != nil {
 		log.Fatalf("Cannot flush reduce result to file: %v [ReduceId: %v]\n", filePath, reduceId)
-		return false
 	}
 
 	file.Close()
@@ -220,7 +208,6 @@ func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string]
 	err = os.Rename(filePath, newPath)
 	if err != nil {
 		log.Fatalf("Cannot to rename file from %v to %v [ReduceId: %v]\n", filePath, newPath, reduceId)
-		return false
 	}
 
 	return true
