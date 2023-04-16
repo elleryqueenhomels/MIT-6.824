@@ -58,17 +58,19 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 
 		canExit, succ := false, true
 		if reply.TaskType == MapTask {
-			done := doMap(mapFn, reply.TaskId, reply.FilePath)
-			if done {
+			err := doMap(mapFn, reply.TaskId, reply.FilePath)
+			if err == nil {
 				canExit, succ = reportTaskFinished(MapTask, reply.TaskId)
 			} else {
+				fmt.Printf("Failed to complete map task [TaskId: %v], error: %v", reply.TaskId, err)
 				succ = reportTaskFailed(MapTask, reply.TaskId)
 			}
 		} else if reply.TaskType == ReduceTask {
-			done := doReduce(reduceFn, reply.TaskId)
-			if done {
+			err := doReduce(reduceFn, reply.TaskId)
+			if err == nil {
 				canExit, succ = reportTaskFinished(ReduceTask, reply.TaskId)
 			} else {
+				fmt.Printf("Failed to complete reduce task [TaskId: %v], error: %v", reply.TaskId, err)
 				succ = reportTaskFailed(ReduceTask, reply.TaskId)
 			}
 		}
@@ -86,22 +88,22 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 	}
 }
 
-func doMap(mapFn func(string, string) []KeyValue, mapId int, filePath string) bool {
+func doMap(mapFn func(string, string) []KeyValue, mapId int, filePath string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
-		log.Fatalf("Cannot open file: %v [MapId: %v]\n", filePath, mapId)
+		return fmt.Errorf("cannot open file: %v [MapId: %v], error: %v", filePath, mapId, err)
 	}
 
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		log.Fatalf("Cannot read content from file: %v [MapId: %v]\n", filePath, mapId)
+		return fmt.Errorf("cannot read content from file: %v [MapId: %v], error: %v", filePath, mapId, err)
 	}
 
 	kva := mapFn(filePath, string(content))
 	return writeMapOutput(kva, mapId)
 }
 
-func writeMapOutput(kva []KeyValue, mapId int) bool {
+func writeMapOutput(kva []KeyValue, mapId int) error {
 	prefix := fmt.Sprintf("%v/mr-%v", TempDir, mapId)
 	files := make([]*os.File, 0, reduceCount)
 	buffers := make([]*bufio.Writer, 0, reduceCount)
@@ -111,7 +113,7 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 		filePath := fmt.Sprintf("%v-%v-%v", prefix, i, workerId)
 		file, err := os.Create(filePath)
 		if err != nil {
-			log.Fatalf("Cannot create file: %v [MapId: %v]\n", filePath, mapId)
+			return fmt.Errorf("cannot create file: %v [MapId: %v], error: %v", filePath, mapId, err)
 		}
 
 		buf := bufio.NewWriter(file)
@@ -124,14 +126,14 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 		reduceId := ihash(kv.Key) % reduceCount
 		err := encoders[reduceId].Encode(kv)
 		if err != nil {
-			log.Fatalf("Cannot encode %v to file: %v [MapId: %v]\n", kv, files[reduceId].Name(), mapId)
+			return fmt.Errorf("cannot encode %v to file: %v [MapId: %v], error: %v", kv, files[reduceId].Name(), mapId, err)
 		}
 	}
 
 	for i, buf := range buffers {
 		err := buf.Flush()
 		if err != nil {
-			log.Fatalf("Cannot flush file: %v [MapId: %v]\n", files[i].Name(), mapId)
+			return fmt.Errorf("cannot flush file: %v [MapId: %v], error: %v", files[i].Name(), mapId, err)
 		}
 	}
 
@@ -140,17 +142,17 @@ func writeMapOutput(kva []KeyValue, mapId int) bool {
 		newPath := fmt.Sprintf("%v-%v", prefix, i)
 		err := os.Rename(file.Name(), newPath)
 		if err != nil {
-			log.Fatalf("Cannot rename file from %v to %v [MapId: %v]\n", files[i].Name(), newPath, mapId)
+			return fmt.Errorf("cannot rename file from %v to %v [MapId: %v], error: %v", files[i].Name(), newPath, mapId, err)
 		}
 	}
 
-	return true
+	return nil
 }
 
-func doReduce(reduceFn func(string, []string) string, reduceId int) bool {
+func doReduce(reduceFn func(string, []string) string, reduceId int) error {
 	filePaths, err := filepath.Glob(fmt.Sprintf("%v/mr-%v-%v", TempDir, "*", reduceId))
 	if err != nil {
-		log.Fatalf("Cannot to list intermediate files. [ReduceId: %v]\n", reduceId)
+		return fmt.Errorf("cannot to list intermediate files [ReduceId: %v], error: %v", reduceId, err)
 	}
 
 	var kvMap = make(map[string][]string)
@@ -159,14 +161,14 @@ func doReduce(reduceFn func(string, []string) string, reduceId int) bool {
 	for _, filePath := range filePaths {
 		file, err := os.Open(filePath)
 		if err != nil {
-			log.Fatalf("Cannot open file: %v [ReduceId: %v]\n", filePath, reduceId)
+			return fmt.Errorf("cannot open file: %v [ReduceId: %v], error: %v", filePath, reduceId, err)
 		}
 
 		dec := json.NewDecoder(file)
 		for dec.More() {
 			err = dec.Decode(&kv)
 			if err != nil {
-				log.Fatalf("Cannot decode from file: %v [ReduceId: %v]\n", filePath, reduceId)
+				return fmt.Errorf("cannot decode from file: %v [ReduceId: %v], error: %v", filePath, reduceId, err)
 			}
 
 			kvMap[kv.Key] = append(kvMap[kv.Key], kv.Value)
@@ -176,7 +178,7 @@ func doReduce(reduceFn func(string, []string) string, reduceId int) bool {
 	return writeReduceOutput(reduceFn, kvMap, reduceId)
 }
 
-func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string][]string, reduceId int) bool {
+func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string][]string, reduceId int) error {
 	keys := make([]string, 0, len(kvMap))
 	for k := range kvMap {
 		keys = append(keys, k)
@@ -186,7 +188,7 @@ func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string]
 	filePath := fmt.Sprintf("%v/mr-out-%v-%v", TempDir, reduceId, workerId)
 	file, err := os.Create(filePath)
 	if err != nil {
-		log.Fatalf("Cannot create file: %v [ReduceId: %v]\n", filePath, reduceId)
+		return fmt.Errorf("cannot create file: %v [ReduceId: %v], error: %v", filePath, reduceId, err)
 	}
 
 	buf := bufio.NewWriter(file)
@@ -194,23 +196,23 @@ func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string]
 		v := reduceFn(k, kvMap[k])
 		_, err := fmt.Fprintf(buf, "%v %v\n", k, v)
 		if err != nil {
-			log.Fatalf("Cannot write reduce result to file: %v [ReduceId: %v]\n", filePath, reduceId)
+			return fmt.Errorf("cannot write reduce result to file: %v [ReduceId: %v], error: %v", filePath, reduceId, err)
 		}
 	}
 
 	err = buf.Flush()
 	if err != nil {
-		log.Fatalf("Cannot flush reduce result to file: %v [ReduceId: %v]\n", filePath, reduceId)
+		return fmt.Errorf("cannot flush reduce result to file: %v [ReduceId: %v], error: %v", filePath, reduceId, err)
 	}
 
 	file.Close()
 	newPath := fmt.Sprintf("mr-out-%v", reduceId)
 	err = os.Rename(filePath, newPath)
 	if err != nil {
-		log.Fatalf("Cannot to rename file from %v to %v [ReduceId: %v]\n", filePath, newPath, reduceId)
+		return fmt.Errorf("cannot to rename file from %v to %v [ReduceId: %v], error: %v", filePath, newPath, reduceId, err)
 	}
 
-	return true
+	return nil
 }
 
 func reportTaskFinished(taskType TaskType, taskId int) (bool, bool) {
