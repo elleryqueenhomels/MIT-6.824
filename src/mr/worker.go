@@ -31,7 +31,7 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 	workerId = os.Getpid()
 	rCount, succ := getReduceCount()
 	if !succ {
-		fmt.Printf("Failed to get reduce count config. Worker-%v exiting.\n", workerId)
+		log.Printf("Failed to get reduce count config. Worker-%v exiting.\n", workerId)
 		return
 	}
 
@@ -40,11 +40,11 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 	for {
 		reply, succ := requestTask()
 		if !succ {
-			fmt.Printf("Failed to get task. Worker-%v exiting.\n", workerId)
+			log.Printf("Failed to get task. Worker-%v exiting.\n", workerId)
 			return
 		}
 		if reply.TaskType == ExitTask {
-			fmt.Printf("All tasks are finished. Worker-%v exiting.\n", workerId)
+			log.Printf("All tasks are finished. Worker-%v exiting.\n", workerId)
 			return
 		}
 
@@ -54,7 +54,7 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 			if err == nil {
 				canExit, succ = reportTaskFinished(MapTask, reply.TaskId)
 			} else {
-				fmt.Printf("Failed to complete map task [TaskId: %v], error: %v", reply.TaskId, err)
+				log.Printf("Failed to complete map task [TaskId: %v], error: %v", reply.TaskId, err)
 				succ = reportTaskFailed(MapTask, reply.TaskId)
 			}
 		} else if reply.TaskType == ReduceTask {
@@ -62,17 +62,17 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 			if err == nil {
 				canExit, succ = reportTaskFinished(ReduceTask, reply.TaskId)
 			} else {
-				fmt.Printf("Failed to complete reduce task [TaskId: %v], error: %v", reply.TaskId, err)
+				log.Printf("Failed to complete reduce task [TaskId: %v], error: %v", reply.TaskId, err)
 				succ = reportTaskFailed(ReduceTask, reply.TaskId)
 			}
 		}
 
 		if !succ {
-			fmt.Printf("Coordinator has exited. Worker-%v exiting.\n", workerId)
+			log.Printf("Coordinator has exited. Worker-%v exiting.\n", workerId)
 			return
 		}
 		if canExit {
-			fmt.Printf("All tasks are finished. Worker-%v exiting.\n", workerId)
+			log.Printf("All tasks are finished. Worker-%v exiting.\n", workerId)
 			return
 		}
 
@@ -264,6 +264,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	log.Println(err)
 	return false
 }
