@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -68,10 +67,6 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 		task = selectTask(c.reduceTasks)
 	} else {
 		task = &Task{ExitTask, NotStarted, -1, "", -1}
-	}
-
-	if task.TaskType == NoTask {
-		return errors.New("no available task")
 	}
 
 	task.WorkerId = args.WorkerId
@@ -164,20 +159,6 @@ func (c *Coordinator) waitForTask(task *Task) {
 	}
 }
 
-// start a thread that listens for RPCs from worker.go
-func (c *Coordinator) server() {
-	rpc.Register(c)
-	rpc.HandleHTTP()
-	// l, e := net.Listen("tcp", ":1234")
-	sockname := coordinatorSock()
-	os.Remove(sockname)
-	l, e := net.Listen("unix", sockname)
-	if e != nil {
-		log.Fatal("listen error:", e)
-	}
-	go http.Serve(l, nil)
-}
-
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
@@ -245,4 +226,18 @@ func (c *Coordinator) cleanupAndPrepare() {
 	if err != nil {
 		log.Fatalf("Cannot create temp directory: %v\n", TempDir)
 	}
+}
+
+// start a thread that listens for RPCs from worker.go
+func (c *Coordinator) server() {
+	rpc.Register(c)
+	rpc.HandleHTTP()
+	// l, e := net.Listen("tcp", ":1234")
+	sockname := coordinatorSock()
+	os.Remove(sockname)
+	l, e := net.Listen("unix", sockname)
+	if e != nil {
+		log.Fatal("listen error:", e)
+	}
+	go http.Serve(l, nil)
 }
