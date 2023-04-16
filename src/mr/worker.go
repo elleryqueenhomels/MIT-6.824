@@ -25,14 +25,6 @@ type KeyValue struct {
 	Value string
 }
 
-// use ihash(key) % NReduce to choose the reduce
-// task number for each KeyValue emitted by Map.
-func ihash(key string) int {
-	h := fnv.New32a()
-	h.Write([]byte(key))
-	return int(h.Sum32() & 0x7fffffff)
-}
-
 // main/mrworker.go calls this function.
 func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []string) string) {
 	// Your worker implementation here.
@@ -245,6 +237,14 @@ func getReduceCount() (int, bool) {
 	succ := call("Coordinator.GetReduceCount", args, reply)
 
 	return reply.ReduceCount, succ
+}
+
+// use ihash(key) % NReduce to choose the reduce
+// task number for each KeyValue emitted by Map.
+func ihash(key string) int {
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	return int(h.Sum32() & 0x7fffffff)
 }
 
 // send an RPC request to the coordinator, wait for the response.
