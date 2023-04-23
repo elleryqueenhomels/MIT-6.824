@@ -16,29 +16,34 @@ import (
 
 const TaskInterval = 200 // milliseconds
 
-var workerId int
-var reduceCount int
-
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
+type worker struct {
+	workerId    int
+	reduceCount int
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []string) string) {
 	// Your worker implementation here.
-	workerId = os.Getpid()
+	workerId := os.Getpid()
 	rCount, succ := getReduceCount()
 	if !succ {
 		log.Printf("Failed to get reduce count config. Worker-%v exiting.\n", workerId)
 		return
 	}
 
-	reduceCount = rCount
+	w := &worker{
+		workerId:    workerId,
+		reduceCount: rCount,
+	}
 
 	for {
-		reply, succ := requestTask()
+		reply, succ := w.requestTask()
 		if !succ {
 			log.Printf("Failed to get task. Worker-%v exiting.\n", workerId)
 			return
@@ -50,20 +55,20 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 
 		canExit, succ := false, true
 		if reply.TaskType == MapTask {
-			err := doMap(mapFn, reply.TaskId, reply.FilePath)
+			err := w.doMap(mapFn, reply.TaskId, reply.FilePath)
 			if err == nil {
-				canExit, succ = reportTaskFinished(MapTask, reply.TaskId)
+				canExit, succ = w.reportTaskFinished(MapTask, reply.TaskId)
 			} else {
 				log.Printf("Failed to complete map task [TaskId: %v], error: %v", reply.TaskId, err)
-				succ = reportTaskFailed(MapTask, reply.TaskId)
+				succ = w.reportTaskFailed(MapTask, reply.TaskId)
 			}
 		} else if reply.TaskType == ReduceTask {
-			err := doReduce(reduceFn, reply.TaskId)
+			err := w.doReduce(reduceFn, reply.TaskId)
 			if err == nil {
-				canExit, succ = reportTaskFinished(ReduceTask, reply.TaskId)
+				canExit, succ = w.reportTaskFinished(ReduceTask, reply.TaskId)
 			} else {
 				log.Printf("Failed to complete reduce task [TaskId: %v], error: %v", reply.TaskId, err)
-				succ = reportTaskFailed(ReduceTask, reply.TaskId)
+				succ = w.reportTaskFailed(ReduceTask, reply.TaskId)
 			}
 		}
 
@@ -80,7 +85,7 @@ func Worker(mapFn func(string, string) []KeyValue, reduceFn func(string, []strin
 	}
 }
 
-func doMap(mapFn func(string, string) []KeyValue, mapId int, filePath string) error {
+func (w *worker) doMap(mapFn func(string, string) []KeyValue, mapId int, filePath string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("cannot open file: %v [MapId: %v], error: %v", filePath, mapId, err)
@@ -92,17 +97,17 @@ func doMap(mapFn func(string, string) []KeyValue, mapId int, filePath string) er
 	}
 
 	kva := mapFn(filePath, string(content))
-	return writeMapOutput(kva, mapId)
+	return w.writeMapOutput(kva, mapId)
 }
 
-func writeMapOutput(kva []KeyValue, mapId int) error {
+func (w *worker) writeMapOutput(kva []KeyValue, mapId int) error {
 	prefix := fmt.Sprintf("%v/mr-%v", TempDir, mapId)
-	files := make([]*os.File, 0, reduceCount)
-	buffers := make([]*bufio.Writer, 0, reduceCount)
-	encoders := make([]*json.Encoder, 0, reduceCount)
+	files := make([]*os.File, 0, w.reduceCount)
+	buffers := make([]*bufio.Writer, 0, w.reduceCount)
+	encoders := make([]*json.Encoder, 0, w.reduceCount)
 
-	for i := 0; i < reduceCount; i++ {
-		filePath := fmt.Sprintf("%v-%v-%v", prefix, i, workerId)
+	for i := 0; i < w.reduceCount; i++ {
+		filePath := fmt.Sprintf("%v-%v-%v", prefix, i, w.workerId)
 		file, err := os.Create(filePath)
 		if err != nil {
 			return fmt.Errorf("cannot create file: %v [MapId: %v], error: %v", filePath, mapId, err)
@@ -115,7 +120,7 @@ func writeMapOutput(kva []KeyValue, mapId int) error {
 	}
 
 	for _, kv := range kva {
-		reduceId := ihash(kv.Key) % reduceCount
+		reduceId := w.ihash(kv.Key)
 		err := encoders[reduceId].Encode(kv)
 		if err != nil {
 			return fmt.Errorf("cannot encode %v to file: %v [MapId: %v], error: %v", kv, files[reduceId].Name(), mapId, err)
@@ -141,7 +146,7 @@ func writeMapOutput(kva []KeyValue, mapId int) error {
 	return nil
 }
 
-func doReduce(reduceFn func(string, []string) string, reduceId int) error {
+func (w *worker) doReduce(reduceFn func(string, []string) string, reduceId int) error {
 	filePaths, err := filepath.Glob(fmt.Sprintf("%v/mr-%v-%v", TempDir, "*", reduceId))
 	if err != nil {
 		return fmt.Errorf("cannot to list intermediate files [ReduceId: %v], error: %v", reduceId, err)
@@ -167,17 +172,17 @@ func doReduce(reduceFn func(string, []string) string, reduceId int) error {
 		}
 	}
 
-	return writeReduceOutput(reduceFn, kvMap, reduceId)
+	return w.writeReduceOutput(reduceFn, kvMap, reduceId)
 }
 
-func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string][]string, reduceId int) error {
+func (w *worker) writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string][]string, reduceId int) error {
 	keys := make([]string, 0, len(kvMap))
 	for k := range kvMap {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
-	filePath := fmt.Sprintf("%v/mr-out-%v-%v", TempDir, reduceId, workerId)
+	filePath := fmt.Sprintf("%v/mr-out-%v-%v", TempDir, reduceId, w.workerId)
 	file, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("cannot create file: %v [ReduceId: %v], error: %v", filePath, reduceId, err)
@@ -207,24 +212,24 @@ func writeReduceOutput(reduceFn func(string, []string) string, kvMap map[string]
 	return nil
 }
 
-func reportTaskFinished(taskType TaskType, taskId int) (bool, bool) {
-	args := &ReportTaskFinishedArgs{taskType, taskId, workerId}
+func (w *worker) reportTaskFinished(taskType TaskType, taskId int) (bool, bool) {
+	args := &ReportTaskFinishedArgs{taskType, taskId, w.workerId}
 	reply := &ReportTaskFinishedReply{}
 	succ := call("Coordinator.ReportTaskFinished", args, reply)
 
 	return reply.CanExit, succ
 }
 
-func reportTaskFailed(taskType TaskType, taskId int) bool {
-	args := &ReportTaskFailedArgs{taskType, taskId, workerId}
+func (w *worker) reportTaskFailed(taskType TaskType, taskId int) bool {
+	args := &ReportTaskFailedArgs{taskType, taskId, w.workerId}
 	reply := &ReportTaskFailedReply{}
 	succ := call("Coordinator.ReportTaskFailed", args, reply)
 
 	return succ
 }
 
-func requestTask() (*RequestTaskReply, bool) {
-	args := &RequestTaskArgs{workerId}
+func (w *worker) requestTask() (*RequestTaskReply, bool) {
+	args := &RequestTaskArgs{w.workerId}
 	reply := &RequestTaskReply{}
 	succ := call("Coordinator.RequestTask", args, reply)
 
@@ -241,10 +246,10 @@ func getReduceCount() (int, bool) {
 
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
-func ihash(key string) int {
+func (w *worker) ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
-	return int(h.Sum32() & 0x7fffffff)
+	return int(h.Sum32()&0x7fffffff) % w.reduceCount
 }
 
 // send an RPC request to the coordinator, wait for the response.

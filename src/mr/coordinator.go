@@ -21,7 +21,7 @@ const (
 	MapTask TaskType = iota
 	ReduceTask
 	ExitTask
-	NoTask
+	IdleTask
 )
 
 const (
@@ -43,8 +43,8 @@ type Coordinator struct {
 	mu          sync.Mutex
 	mapTasks    []*Task
 	reduceTasks []*Task
-	nMap        int
-	nReduce     int
+	nMap        int // number of remaining map tasks
+	nReduce     int // number of remaining reduce tasks
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -140,7 +140,7 @@ func selectTask(tasks []*Task) *Task {
 			return task
 		}
 	}
-	return &Task{NoTask, NotStarted, -1, "", -1}
+	return &Task{IdleTask, NotStarted, -1, "", -1}
 }
 
 func (c *Coordinator) waitForTask(task *Task) {
